@@ -6,4 +6,5 @@ type Ball struct {
 	accl   Vec2
 	mass   int
 	radius int
+	decay  float64
 }

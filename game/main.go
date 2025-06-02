@@ -28,6 +28,8 @@ const (
 	FloorHeight     = FloorRatio * WorldHeight
 	FloorLevel      = WorldHeight - FloorHeight
 	PhysicsDelta    = time.Second / 60
+	Gravity         = 9.8
+	ForceScale      = 100
 	AudioSampleRate = 44100
 )
 
@@ -45,9 +47,10 @@ type Game struct {
 func NewGame() *Game {
 	b := Ball{
 		pos:    Vec2{WorldWidth / 2, WorldHeight / 2},
-		accl:   Vec2{0, 9.8 * 100},
+		accl:   Vec2{0, Gravity * ForceScale},
 		radius: 16,
 		mass:   10,
+		decay:  0.3,
 	}
 
 	bs := LoadKolobok() //drawCircle(b.radius, color.RGBA{R: 210, G: 100, B: 30, A: 255})
@@ -92,7 +95,7 @@ func (g *Game) GetControlVector(keys []ebiten.Key, speed float64) Vec2 {
 	}
 
 	if ebiten.IsKeyPressed(ebiten.KeySpace) && g.checkCollision() {
-		v.y -= 600
+		v.y = -(0.5 * Gravity * ForceScale)
 		if !g.audioPlayer.IsPlaying() {
 			g.audioPlayer.Rewind() // go back to start
 			g.audioPlayer.Play()
@@ -132,7 +135,7 @@ func (g *Game) Update() error {
 
 func (g *Game) physicsStep(dt time.Duration) {
 	if g.checkCollision() {
-		g.ball.vel.y *= -0.5
+		g.ball.vel.y *= -g.ball.decay
 	}
 	g.ball.vel.Add(g.ball.accl.MultByScalar(dt.Seconds()))
 	g.ball.vel.Add(g.playerControlsVector)
@@ -143,8 +146,8 @@ func (g *Game) physicsStep(dt time.Duration) {
 
 func (g *Game) checkCollision() bool {
 	// check floor collision
-	if (g.ball.pos.y + float64(g.ball.radius)*2) >= FloorLevel {
-		g.ball.pos.y = float64(FloorLevel - g.ball.radius*2)
+	if (g.ball.pos.y + float64(g.ball.radius)) >= FloorLevel {
+		g.ball.pos.y = float64(FloorLevel - g.ball.radius)
 		return true
 	}
 	return false
@@ -152,6 +155,7 @@ func (g *Game) checkCollision() bool {
 
 func (g *Game) Draw(screen *ebiten.Image) {
 	op := &ebiten.DrawImageOptions{}
+	op.Filter = ebiten.FilterLinear
 
 	// bg
 	bgImg := ebiten.NewImage(WorldWidth, WorldHeight)
@@ -163,9 +167,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	groundImg.Fill(color.RGBA{R: 65, G: 45, B: 25, A: 255})
 
 	op.GeoM.Translate(0, FloorLevel)
+
 	screen.DrawImage(groundImg, op)
 
 	op.GeoM.Reset()
+	op.GeoM.Translate(-float64(g.ballSprite.Bounds().Dx())/2, -float64(g.ballSprite.Bounds().Dy())/2)
+	op.GeoM.Rotate(g.ball.pos.x / float64(g.ball.radius))
 	op.GeoM.Translate(g.ball.pos.x, g.ball.pos.y)
 	screen.DrawImage(g.ballSprite, op)
 
