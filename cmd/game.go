@@ -9,8 +9,11 @@ import (
 
 func main() {
 	ebiten.SetWindowSize(game.ScreenWidth, game.ScreenHeight)
-	ebiten.SetWindowTitle("Hello, World!")
-	if err := ebiten.RunGame(&game.Game{}); err != nil {
+	ebiten.SetWindowTitle("Ball Game!")
+
+	g := game.NewGame()
+
+	if err := ebiten.RunGame(g); err != nil {
 		log.Fatal(err)
 	}
 }
