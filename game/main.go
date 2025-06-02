@@ -1,25 +1,39 @@
 package game
 
 import (
+	"bytes"
+	"embed"
 	"fmt"
 	"image/color"
+	"image/png"
+	"log"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/audio"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 )
 
+//go:embed assets/*
+var assets embed.FS
+
 const (
-	ScreenWidth  = 640
-	ScreenHeight = 480
-	FloorRatio   = 0.2
-	FloorHeight  = FloorRatio * ScreenHeight
-	FloorLevel   = ScreenHeight - FloorHeight
-	PhysicsDelta = time.Second / 60
+	ScreenWidth     = 1280
+	ScreenHeight    = 720
+	GlobalScale     = 0.5
+	WorldWidth      = ScreenWidth * GlobalScale
+	WorldHeight     = ScreenHeight * GlobalScale
+	FloorRatio      = 0.2
+	FloorHeight     = FloorRatio * WorldHeight
+	FloorLevel      = WorldHeight - FloorHeight
+	PhysicsDelta    = time.Second / 60
+	AudioSampleRate = 44100
 )
 
 type Game struct {
+	audioCtx             *audio.Context
+	audioPlayer          *audio.Player
 	ballSprite           *ebiten.Image
 	playerControlsVector Vec2
 	lastUpdateTime       time.Time
@@ -30,16 +44,41 @@ type Game struct {
 
 func NewGame() *Game {
 	b := Ball{
-		pos:    Vec2{ScreenWidth / 2, ScreenHeight / 2},
+		pos:    Vec2{WorldWidth / 2, WorldHeight / 2},
 		accl:   Vec2{0, 9.8 * 100},
-		radius: 15,
+		radius: 16,
 		mass:   10,
 	}
-	bs := drawCircle(b.radius, color.RGBA{R: 128, G: 150, B: 32, A: 128})
+
+	bs := LoadKolobok() //drawCircle(b.radius, color.RGBA{R: 210, G: 100, B: 30, A: 255})
+	ctx := audio.NewContext(AudioSampleRate)
+	sound := LoadKolobokSound()
+
 	return &Game{
-		ballSprite: bs,
-		ball:       b,
+		audioCtx:    ctx,
+		audioPlayer: ctx.NewPlayerFromBytes(sound),
+		ballSprite:  bs,
+		ball:        b,
 	}
+}
+
+func LoadKolobok() *ebiten.Image {
+	data, err := assets.ReadFile("assets/kolobok.png")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	img, _ := png.Decode(bytes.NewReader(data))
+	return ebiten.NewImageFromImage(img)
+}
+
+func LoadKolobokSound() []byte {
+	data, err := assets.ReadFile("assets/kolobok_jump.wav")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return data
 }
 
 func (g *Game) GetControlVector(keys []ebiten.Key, speed float64) Vec2 {
@@ -54,6 +93,10 @@ func (g *Game) GetControlVector(keys []ebiten.Key, speed float64) Vec2 {
 
 	if ebiten.IsKeyPressed(ebiten.KeySpace) && g.checkCollision() {
 		v.y -= 600
+		if !g.audioPlayer.IsPlaying() {
+			g.audioPlayer.Rewind() // go back to start
+			g.audioPlayer.Play()
+		}
 	}
 
 	v.x *= speed
@@ -88,9 +131,6 @@ func (g *Game) Update() error {
 }
 
 func (g *Game) physicsStep(dt time.Duration) {
-	//now := time.Now()
-
-	//g.msgPoint.Add(v)
 	if g.checkCollision() {
 		g.ball.vel.y *= -0.5
 	}
@@ -98,13 +138,7 @@ func (g *Game) physicsStep(dt time.Duration) {
 	g.ball.vel.Add(g.playerControlsVector)
 	g.ball.vel.x *= 0.8
 	g.ball.pos.Add(g.ball.vel.MultByScalar(dt.Seconds()))
-	// if now.Before(g.body.AccelEndTime) {
-	// 	g.body.Acceleration = g.body.AppliedAcceleration
-	// } else {
-	// 	g.body.Acceleration = 0
-	// }
 
-	// Apply acceleration to velocity, position, etc. here
 }
 
 func (g *Game) checkCollision() bool {
@@ -117,10 +151,16 @@ func (g *Game) checkCollision() bool {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	groundImg := ebiten.NewImage(ScreenWidth, FloorHeight)
-	groundImg.Fill(color.RGBA{R: 128, G: 32, B: 16, A: 23})
-
 	op := &ebiten.DrawImageOptions{}
+
+	// bg
+	bgImg := ebiten.NewImage(WorldWidth, WorldHeight)
+	bgImg.Fill(color.RGBA{R: 90, G: 165, B: 200, A: 255})
+	screen.DrawImage(bgImg, op)
+
+	// ground
+	groundImg := ebiten.NewImage(WorldWidth, WorldHeight)
+	groundImg.Fill(color.RGBA{R: 65, G: 45, B: 25, A: 255})
 
 	op.GeoM.Translate(0, FloorLevel)
 	screen.DrawImage(groundImg, op)
@@ -132,34 +172,33 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	ebitenutil.DebugPrintAt(
 		screen,
 		fmt.Sprintf(
-			"Hello, World!\n Ball Coords: %s\n Ball sprite %v\n Key pressed: %v",
+			"Press [LEFT/RIGHT] to move,[SPACE] to jump!\n Ball Coords: %s\n Key pressed: %v",
 			g.ball.pos,
-			g.ballSprite.Bounds().Max,
 			g.keys,
-		), 10, 10)
+		), 5, 5)
 }
 
-func drawCircle(radius int, clr color.Color) *ebiten.Image {
-	diameter := radius * 2
-	img := ebiten.NewImage(diameter, diameter)
+// func drawCircle(radius int, clr color.Color) *ebiten.Image {
+// 	diameter := radius * 2
+// 	img := ebiten.NewImage(diameter, diameter)
 
-	// r, g, b, a := clr.RGBA()
-	// fill := color.RGBA{uint8(r), uint8(g), uint8(b), uint8(a)}
-	// stroke := color.RGBA{uint8(r), uint8(g), uint8(b), uint8(a / 2)}
+// 	// r, g, b, a := clr.RGBA()
+// 	// fill := color.RGBA{uint8(r), uint8(g), uint8(b), uint8(a)}
+// 	// stroke := color.RGBA{uint8(r), uint8(g), uint8(b), uint8(a / 2)}
 
-	for y := 0; y < diameter; y++ {
-		for x := 0; x < diameter; x++ {
-			dx := float64(x - radius)
-			dy := float64(y - radius)
-			if float64(radius*radius) >= (dx*dx + dy*dy) {
-				img.Set(x, y, clr)
-			}
-		}
-	}
+// 	for y := 0; y < diameter; y++ {
+// 		for x := 0; x < diameter; x++ {
+// 			dx := float64(x - radius)
+// 			dy := float64(y - radius)
+// 			if float64(radius*radius) >= (dx*dx + dy*dy) {
+// 				img.Set(x, y, clr)
+// 			}
+// 		}
+// 	}
 
-	return img
-}
+// 	return img
+// }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
-	return outsideWidth, outsideHeight
+	return WorldWidth, WorldHeight
 }
