@@ -30,7 +30,7 @@ jobs:
     - name: Release 
       uses: softprops/action-gh-release@v2
       with:
-        name: "Release ${{ VERSION }}"
+        name: "Release ${{ github.ref_name }}"
         files: dist/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
